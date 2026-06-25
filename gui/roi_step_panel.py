@@ -11,6 +11,7 @@ from src.preset_store import load_preset, save_preset
 from src.roi_extractor import find_roi_item
 
 from .common_widgets import ResultTable, StepPanelBase
+from .preset_dialogs import ask_load_preset_path, ask_save_preset_path
 
 
 FIELD_SPECS = [
@@ -72,6 +73,8 @@ class RoiStepPanel(StepPanelBase):
         ttk.Button(self.toolbar, text="Save ROI", command=self.save_selected_roi).pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Save Preset", command=self.save_preset).pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Load Preset", command=self.load_preset_file).pack(side="left", padx=3)
+        ttk.Button(self.toolbar, text="Save As...", command=self.save_preset_as).pack(side="left", padx=3)
+        ttk.Button(self.toolbar, text="Load As...", command=self.load_preset_as).pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Reset", command=self.reset_params).pack(side="left", padx=3)
         ttk.Label(self.toolbar, textvariable=self.status_var).pack(side="left", padx=(8, 0))
         self.log_label.pack_forget()
@@ -149,17 +152,48 @@ class RoiStepPanel(StepPanelBase):
             if self.auto_update_var.get():
                 self.run_step()
 
+    def _store_shared_params(self):
+        self.app.shared["roi_params"] = self.params
+
     def save_preset(self):
         self.params = self.parameter_panel.get_data()
         save_preset(ROI_PRESET_PATH, self.params)
+        self._store_shared_params()
         messagebox.showinfo("Preset", "Da luu roi_preset.json")
 
     def load_preset_file(self):
         self.params = load_preset(ROI_PRESET_PATH, DEFAULT_ROI_PARAMS)
         self.parameter_panel.set_data(self.params)
+        self._store_shared_params()
+
+    def save_preset_as(self):
+        target_path = ask_save_preset_path(ROI_PRESET_PATH, "Luu ROI preset thanh file rieng")
+        if not target_path:
+            return
+        self.params = self.parameter_panel.get_data()
+        save_preset(target_path, self.params)
+        self._store_shared_params()
+        messagebox.showinfo(
+            "Preset",
+            "Da luu preset test tai:\n{}\n\nPreset goc trong thu muc presets khong bi thay doi.".format(target_path),
+        )
+
+    def load_preset_as(self):
+        target_path = ask_load_preset_path(ROI_PRESET_PATH, "Nap ROI preset tu file rieng")
+        if not target_path:
+            return
+        self.params = load_preset(target_path, DEFAULT_ROI_PARAMS)
+        self.parameter_panel.set_data(self.params)
+        self._store_shared_params()
+        messagebox.showinfo(
+            "Preset",
+            "Da nap preset test tu:\n{}\n\nPreset goc trong thu muc presets khong bi ghi de.".format(target_path),
+        )
 
     def reset_params(self):
         self.parameter_panel.set_data(DEFAULT_ROI_PARAMS)
+        self.params = self.parameter_panel.get_data()
+        self._store_shared_params()
 
     def _crop_params_only(self, params):
         return {

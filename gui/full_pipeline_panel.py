@@ -119,9 +119,9 @@ class FullPipelinePanel(StepPanelBase):
         request = {
             "image_path": image_path,
             "hough_params": self.app.shared.get("hough_params") or load_preset(HOUGH_PRESET_PATH, DEFAULT_HOUGH_PARAMS),
-            "roi_params": load_preset(ROI_PRESET_PATH, DEFAULT_ROI_PARAMS),
-            "tab_edge_params": load_preset(TAB_EDGE_PRESET_PATH, DEFAULT_TAB_EDGE_PARAMS),
-            "radial_params": load_preset(RADIAL_PRESET_PATH, DEFAULT_RADIAL_PARAMS),
+            "roi_params": self.app.shared.get("roi_params") or load_preset(ROI_PRESET_PATH, DEFAULT_ROI_PARAMS),
+            "tab_edge_params": self.app.shared.get("tab_edge_params") or load_preset(TAB_EDGE_PRESET_PATH, DEFAULT_TAB_EDGE_PARAMS),
+            "radial_params": self.app.shared.get("radial_params") or load_preset(RADIAL_PRESET_PATH, DEFAULT_RADIAL_PARAMS),
             "template_data": template_data,
         }
         self._start_worker(request)

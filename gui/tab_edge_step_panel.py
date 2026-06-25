@@ -10,6 +10,7 @@ from src.preset_store import load_preset, save_preset
 from src.roi_extractor import find_roi_item
 
 from .common_widgets import StepPanelBase
+from .preset_dialogs import ask_load_preset_path, ask_save_preset_path
 
 
 FIELD_SPECS = [
@@ -55,6 +56,8 @@ class TabEdgeStepPanel(StepPanelBase):
         ttk.Button(self.toolbar, text="Run", command=self.run_step).pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Save Preset", command=self.save_preset).pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Load Preset", command=self.load_preset_file).pack(side="left", padx=3)
+        ttk.Button(self.toolbar, text="Save As...", command=self.save_preset_as).pack(side="left", padx=3)
+        ttk.Button(self.toolbar, text="Load As...", command=self.load_preset_as).pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Reset", command=self.reset_params).pack(side="left", padx=3)
         self.refresh_roi_ids()
 
@@ -70,17 +73,48 @@ class TabEdgeStepPanel(StepPanelBase):
         if path:
             self.roi_path_var.set(path)
 
+    def _store_shared_params(self):
+        self.app.shared["tab_edge_params"] = self.params
+
     def save_preset(self):
         self.params = self.parameter_panel.get_data()
         save_preset(TAB_EDGE_PRESET_PATH, self.params)
+        self._store_shared_params()
         messagebox.showinfo("Preset", "Da luu tab_edge_preset.json")
 
     def load_preset_file(self):
         self.params = load_preset(TAB_EDGE_PRESET_PATH, DEFAULT_TAB_EDGE_PARAMS)
         self.parameter_panel.set_data(self.params)
+        self._store_shared_params()
+
+    def save_preset_as(self):
+        target_path = ask_save_preset_path(TAB_EDGE_PRESET_PATH, "Luu Tab Edge preset thanh file rieng")
+        if not target_path:
+            return
+        self.params = self.parameter_panel.get_data()
+        save_preset(target_path, self.params)
+        self._store_shared_params()
+        messagebox.showinfo(
+            "Preset",
+            "Da luu preset test tai:\n{}\n\nPreset goc trong thu muc presets khong bi thay doi.".format(target_path),
+        )
+
+    def load_preset_as(self):
+        target_path = ask_load_preset_path(TAB_EDGE_PRESET_PATH, "Nap Tab Edge preset tu file rieng")
+        if not target_path:
+            return
+        self.params = load_preset(target_path, DEFAULT_TAB_EDGE_PARAMS)
+        self.parameter_panel.set_data(self.params)
+        self._store_shared_params()
+        messagebox.showinfo(
+            "Preset",
+            "Da nap preset test tu:\n{}\n\nPreset goc trong thu muc presets khong bi ghi de.".format(target_path),
+        )
 
     def reset_params(self):
         self.parameter_panel.set_data(DEFAULT_TAB_EDGE_PARAMS)
+        self.params = self.parameter_panel.get_data()
+        self._store_shared_params()
 
     def _manual_roi_item(self, path):
         image = read_image(path)

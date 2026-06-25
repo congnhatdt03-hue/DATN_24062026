@@ -160,6 +160,38 @@ def filter_circles_by_radius_consensus(circles, params):
     return filtered, common_radius
 
 
+def select_expected_by_grid(circles, expected, radius, min_score=0.0):
+    """Keep `expected` circles best matching the tray grid layout.
+
+    Truoc tien loai cac ung vien co diem canh `score` < `min_score`: day la
+    cac vong tron rac tren nen/luoi/san (ring it diem canh that). Nho do khi
+    mot stator that bi thieu (vi du bat rong phan quang Hough khong thay),
+    buoc chon khong "lap day" bang vong rac ma tra ve so luong dung thuc te.
+
+    Sau khi loc, neu so circle van vuot `expected`, uu tien giu cac tam co
+    nhieu lang gieng thang hang: cung hang (gan nhau theo y) va cung cot (gan
+    nhau theo x). Stator that nam tren luoi deu nen co ca row va col support
+    cao; vong rac le thuong chi thang hang mot chieu hoac don le. Diem canh
+    `score` dung de pha hoa khi grid support bang nhau.
+    """
+    candidates = [item for item in circles if float(item.get("score", 0.0)) >= float(min_score)]
+    if expected <= 0 or len(candidates) <= expected:
+        return candidates
+    tol = max(1.0, float(radius) * 0.55)
+    ranked = []
+    for circle in candidates:
+        row_support = sum(
+            1 for other in circles if other is not circle and abs(other["y"] - circle["y"]) < tol
+        )
+        col_support = sum(
+            1 for other in circles if other is not circle and abs(other["x"] - circle["x"]) < tol
+        )
+        grid_key = (min(row_support, col_support), row_support + col_support, float(circle.get("score", 0.0)))
+        ranked.append((grid_key, circle))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return [item[1] for item in ranked[:expected]]
+
+
 def sort_circles_by_grid(circles):
     """Sort circles by rows then columns and assign IDs."""
     if not circles:
@@ -191,11 +223,17 @@ def run_hough_step(image, params):
     circles_all = candidate_result["data"]
     deduped = filter_duplicate_circles(circles_all, params)
     consensus, common_radius = filter_circles_by_radius_consensus(deduped, params)
-    circles_filtered = sort_circles_by_grid(consensus)
+    expected = int(round(float(params.get("expected_count", 12))))
+    min_score = float(params.get("filter", {}).get("min_score", 0.1))
+    grid_radius = common_radius if common_radius else (consensus[0]["r"] if consensus else 0)
+    selected = select_expected_by_grid(consensus, expected, grid_radius, min_score)
+    circles_filtered = sort_circles_by_grid(selected)
     logs = list(candidate_result["logs"])
     logs.append("So ung vien sau loc trung tam: {}".format(len(deduped)))
-    logs.append("So circle sau loc ban kinh: {}".format(len(circles_filtered)))
-    expected = int(round(float(params.get("expected_count", 12))))
+    logs.append("So circle sau loc ban kinh: {}".format(len(consensus)))
+    if len(consensus) > len(selected):
+        logs.append("Loai {} vong rac (score < {:.2f} hoac ngoai luoi).".format(len(consensus) - len(selected), min_score))
+    logs.append("So circle cuoi cung: {}".format(len(circles_filtered)))
     if len(circles_filtered) != expected:
         logs.append("Canh bao: phat hien {} / {} stator".format(len(circles_filtered), expected))
     if common_radius is not None:

@@ -27,10 +27,11 @@ from src.io_utils import read_image
 from src.pipeline_runner import run_step_matching
 from src.preset_store import load_preset
 from src.roi_extractor import build_roi_item_from_image
-from src.template_builder import load_template_data
+from src.template_builder import load_template_bundle
 from src.visualization import make_pair_view
 
 from .common_widgets import ImageViewer, ResultTable, StepPanelBase
+from .preset_dialogs import ask_load_json_path
 
 
 def _match_figure(mse_curve, template_norm, current_norm, angle_deg):
@@ -82,6 +83,7 @@ class MatchingStepPanel(StepPanelBase):
         ttk.Entry(self.toolbar, textvariable=self.roi_path_var, width=24).pack(side="left", padx=6, fill="x", expand=True)
         ttk.Button(self.toolbar, text="Chon ROI", command=self.choose_roi).pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Load Template", command=self.load_template).pack(side="left", padx=3)
+        ttk.Button(self.toolbar, text="Load Template File...", command=self.load_template_file).pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Run", command=self.run_step).pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Xoa bang", command=self.clear_table).pack(side="left", padx=3)
 
@@ -126,13 +128,29 @@ class MatchingStepPanel(StepPanelBase):
         if path:
             self.roi_path_var.set(path)
 
+    def _apply_loaded_template(self, template_data, template_roi_image):
+        self.template_data = template_data
+        self.template_roi_image = template_roi_image
+        self.app.shared["template_data"] = template_data
+        self.app.shared["template_roi_image"] = template_roi_image
+        self._rebuild_table()
+
     def load_template(self):
         try:
-            self.template_data = load_template_data(TEMPLATE_DATA_PATH)
-            roi_path = self.template_data.get("template_roi_path")
-            self.template_roi_image = read_image(roi_path) if roi_path else None
-            self._rebuild_table()
+            template_data, template_roi_image, _roi_path = load_template_bundle(TEMPLATE_DATA_PATH)
+            self._apply_loaded_template(template_data, template_roi_image)
             messagebox.showinfo("Template", "Da nap template_data.json")
+        except Exception as exc:
+            messagebox.showerror("Template", str(exc))
+
+    def load_template_file(self):
+        target_path = ask_load_json_path(TEMPLATE_DATA_PATH, "Nap template tu file ngoai")
+        if not target_path:
+            return
+        try:
+            template_data, template_roi_image, _roi_path = load_template_bundle(target_path)
+            self._apply_loaded_template(template_data, template_roi_image)
+            messagebox.showinfo("Template", "Da nap template ngoai:\n{}".format(target_path))
         except Exception as exc:
             messagebox.showerror("Template", str(exc))
 
@@ -159,7 +177,7 @@ class MatchingStepPanel(StepPanelBase):
             image = read_image(roi_path)
             if image is None:
                 raise ValueError("Khong doc duoc ROI test.")
-            roi_params = load_preset(ROI_PRESET_PATH, DEFAULT_ROI_PARAMS)
+            roi_params = self.app.shared.get("roi_params") or load_preset(ROI_PRESET_PATH, DEFAULT_ROI_PARAMS)
             return build_roi_item_from_image(image, roi_params, roi_id=1)
         roi_id_text = self.roi_id_var.get().strip()
         if roi_id_text:
@@ -218,9 +236,8 @@ class MatchingStepPanel(StepPanelBase):
             self.template_data = self.app.shared.get("template_data")
         if self.template_data is None:
             try:
-                self.template_data = load_template_data(TEMPLATE_DATA_PATH)
-                roi_path = self.template_data.get("template_roi_path")
-                self.template_roi_image = read_image(roi_path) if roi_path else None
+                template_data, template_roi_image, _roi_path = load_template_bundle(TEMPLATE_DATA_PATH)
+                self._apply_loaded_template(template_data, template_roi_image)
             except Exception:
                 messagebox.showwarning("Template", "Chua co template. Hay tao o tab 5 hoac Load Template.")
                 return
@@ -229,8 +246,8 @@ class MatchingStepPanel(StepPanelBase):
         except Exception as exc:
             messagebox.showwarning("Matching", str(exc))
             return
-        tab_params = load_preset(TAB_EDGE_PRESET_PATH, DEFAULT_TAB_EDGE_PARAMS)
-        radial_params = load_preset(RADIAL_PRESET_PATH, DEFAULT_RADIAL_PARAMS)
+        tab_params = self.app.shared.get("tab_edge_params") or load_preset(TAB_EDGE_PRESET_PATH, DEFAULT_TAB_EDGE_PARAMS)
+        radial_params = self.app.shared.get("radial_params") or load_preset(RADIAL_PRESET_PATH, DEFAULT_RADIAL_PARAMS)
         result = run_step_matching(roi_item, self.template_data, tab_params, radial_params)
         roi_logs = roi_item.get("logs") or []
         if roi_logs:

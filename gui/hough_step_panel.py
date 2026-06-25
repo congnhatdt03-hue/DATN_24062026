@@ -3,14 +3,20 @@
 import queue
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from src.config import DEFAULT_HOUGH_PARAMS, HOUGH_PRESET_PATH, INPUT_DIR
-from src.io_utils import get_first_image
+from src.io_utils import get_first_image, list_images
 from src.pipeline_runner import run_step_hough
 from src.preset_store import load_preset, save_preset
 
 from .common_widgets import ResultTable, StepPanelBase
+from .preset_dialogs import ask_load_preset_path, ask_save_preset_path
+
+
+MODE_SINGLE = "Anh don"
+MODE_FOLDER = "Thu muc"
 
 
 FIELD_SPECS = [
@@ -59,18 +65,41 @@ class HoughStepPanel(StepPanelBase):
         self.detected_var = tk.StringVar(value="Detected: - / -")
         self.debug_image_var = tk.StringVar()
         self._display_to_image_key = {}
+        self.input_mode_var = tk.StringVar(value=MODE_SINGLE)
+        self.nav_var = tk.StringVar(value="")
+        self.folder_images = []
+        self.folder_index = 0
+        self.summary_rows = {}
         self._build_hough_display_header()
+        ttk.Label(self.toolbar, text="Nguon dau vao").pack(side="left")
+        self.mode_combo = ttk.Combobox(
+            self.toolbar,
+            textvariable=self.input_mode_var,
+            state="readonly",
+            width=9,
+            values=[MODE_SINGLE, MODE_FOLDER],
+        )
+        self.mode_combo.pack(side="left", padx=(2, 8))
+        self.mode_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_mode_change())
         ttk.Label(self.toolbar, text="Anh khay").pack(side="left")
-        ttk.Entry(self.toolbar, textvariable=self.image_path_var, width=42).pack(side="left", padx=6, fill="x", expand=True)
+        ttk.Entry(self.toolbar, textvariable=self.image_path_var, width=36).pack(side="left", padx=6, fill="x", expand=True)
         ttk.Button(self.toolbar, text="Chon anh", command=self.choose_image).pack(side="left", padx=3)
         self.run_button = ttk.Button(self.toolbar, text="Run", command=self.run_step)
         self.run_button.pack(side="left", padx=3)
+        self.prev_button = ttk.Button(self.toolbar, text="< Prev", command=self.prev_image, state="disabled")
+        self.prev_button.pack(side="left", padx=3)
+        self.next_button = ttk.Button(self.toolbar, text="Next >", command=self.next_image, state="disabled")
+        self.next_button.pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Save Preset", command=self.save_preset).pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Load Preset", command=self.load_preset_file).pack(side="left", padx=3)
+        ttk.Button(self.toolbar, text="Save As...", command=self.save_preset_as).pack(side="left", padx=3)
+        ttk.Button(self.toolbar, text="Load As...", command=self.load_preset_as).pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Reset", command=self.reset_params).pack(side="left", padx=3)
         ttk.Label(self.toolbar, textvariable=self.status_var).pack(side="left", padx=(8, 0))
+        ttk.Label(self.left_panel, textvariable=self.nav_var, font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 2), before=self.image_viewer)
         self._build_hough_result_table()
         self._configure_table_columns()
+        self._build_overview_table()
 
     def _build_hough_display_header(self):
         parent = self.left_panel
@@ -114,6 +143,103 @@ class HoughStepPanel(StepPanelBase):
         for name, width in width_map.items():
             self.table.tree.column(name, width=width, anchor="center")
 
+    def _build_overview_table(self):
+        """Thay panel Log ben phai bang bang ket qua tong quat tung anh."""
+        self.log_label.pack_forget()
+        self.log_panel.pack_forget()
+        self.overview_label = ttk.Label(self.right_panel, text="Ket qua tong quat tung anh")
+        self.overview_label.pack(anchor="w", pady=(6, 4))
+        self.overview_table = ResultTable(
+            self.right_panel,
+            ["STT", "Anh", "Stator", "Ban kinh TB", "Score TB"],
+            height=12,
+        )
+        self.overview_table.pack(fill="both", expand=True)
+        width_map = {"STT": 45, "Anh": 130, "Stator": 70, "Ban kinh TB": 95, "Score TB": 80}
+        for name, width in width_map.items():
+            self.overview_table.tree.column(name, width=width, anchor="center")
+
+    def _on_mode_change(self):
+        """Doi giua che do anh don / thu muc -> reset trang thai duyet."""
+        self.folder_images = []
+        self.folder_index = 0
+        self.image_path_var.set("")
+        self._clear_overview()
+        self._reset_summary_ui()
+        self._update_nav()
+
+    def _load_folder(self, folder):
+        """Nap danh sach anh trong thu muc, chua chay."""
+        images = list_images(folder)
+        if not images:
+            messagebox.showwarning("Thu muc rong", "Khong tim thay anh trong thu muc.")
+            return
+        self.folder_images = images
+        self.folder_index = 0
+        self.image_path_var.set(str(folder))
+        self._clear_overview()
+        self._reset_summary_ui()
+        self._update_nav()
+
+    def _run_folder_index(self, index):
+        """Chay step Hough cho anh tai vi tri index trong thu muc."""
+        if not self.folder_images:
+            return
+        index = max(0, min(index, len(self.folder_images) - 1))
+        self.folder_index = index
+        image_path = self.folder_images[index]
+        self._update_nav()
+        self._request_run(str(image_path), self.params, stt=index + 1, image_name=image_path.name)
+
+    def next_image(self):
+        """Xu ly anh tiep theo trong thu muc."""
+        if self.input_mode_var.get() != MODE_FOLDER or not self.folder_images:
+            return
+        if self.folder_index < len(self.folder_images) - 1:
+            self.params = self.parameter_panel.get_data()
+            self._run_folder_index(self.folder_index + 1)
+
+    def prev_image(self):
+        """Quay lai anh truoc do trong thu muc."""
+        if self.input_mode_var.get() != MODE_FOLDER or not self.folder_images:
+            return
+        if self.folder_index > 0:
+            self.params = self.parameter_panel.get_data()
+            self._run_folder_index(self.folder_index - 1)
+
+    def _update_nav(self):
+        """Cap nhat nhan vi tri va trang thai nut Prev/Next."""
+        is_folder = self.input_mode_var.get() == MODE_FOLDER and bool(self.folder_images)
+        if is_folder:
+            total = len(self.folder_images)
+            name = self.folder_images[self.folder_index].name
+            self.nav_var.set("Anh {}/{}: {}".format(self.folder_index + 1, total, name))
+            self.prev_button.configure(state="normal" if self.folder_index > 0 else "disabled")
+            self.next_button.configure(state="normal" if self.folder_index < total - 1 else "disabled")
+        else:
+            self.nav_var.set("")
+            self.prev_button.configure(state="disabled")
+            self.next_button.configure(state="disabled")
+
+    def _clear_overview(self):
+        self.summary_rows = {}
+        self.overview_table.set_rows([])
+
+    def _update_overview(self, request, result):
+        """Upsert mot dong tong quat cho anh vua chay (key theo STT)."""
+        circles = result.get("data", {}).get("circles_filtered", [])
+        params = request.get("params", {})
+        expected = int(round(float(params.get("expected_count", 12))))
+        radii = [float(item.get("r", item.get("radius", 0))) for item in circles]
+        scores = [float(item.get("score", 0.0)) for item in circles]
+        radius_avg = round(sum(radii) / len(radii), 1) if radii else 0.0
+        score_avg = round(sum(scores) / len(scores), 4) if scores else 0.0
+        stt = int(request.get("stt", 1))
+        name = request.get("image_name", "")
+        self.summary_rows[stt] = (stt, name, "{}/{}".format(len(circles), expected), radius_avg, score_avg)
+        rows = [self.summary_rows[key] for key in sorted(self.summary_rows)]
+        self.overview_table.set_rows(rows)
+
     def _display_name_for_key(self, key):
         return DISPLAY_NAME_BY_KEY.get(key, str(key).replace("_", " ").title())
 
@@ -146,6 +272,11 @@ class HoughStepPanel(StepPanelBase):
         self.log_panel.set_lines(result.get("logs", []))
 
     def choose_image(self):
+        if self.input_mode_var.get() == MODE_FOLDER:
+            folder = filedialog.askdirectory(title="Chon thu muc anh", initialdir=str(INPUT_DIR))
+            if folder:
+                self._load_folder(folder)
+            return
         path = filedialog.askopenfilename(title="Chon anh khay", initialdir=str(INPUT_DIR))
         if path:
             self.image_path_var.set(path)
@@ -153,28 +284,70 @@ class HoughStepPanel(StepPanelBase):
             if self.auto_update_var.get():
                 self.run_step()
 
+    def _store_shared_params(self):
+        self.app.shared["hough_params"] = self.params
+
     def save_preset(self):
         self.params = self.parameter_panel.get_data()
         save_preset(HOUGH_PRESET_PATH, self.params)
+        self._store_shared_params()
         messagebox.showinfo("Preset", "Da luu hough_preset.json")
 
     def load_preset_file(self):
         self.params = load_preset(HOUGH_PRESET_PATH, DEFAULT_HOUGH_PARAMS)
         self.parameter_panel.set_data(self.params)
+        self._store_shared_params()
+
+    def save_preset_as(self):
+        target_path = ask_save_preset_path(HOUGH_PRESET_PATH, "Luu Hough preset thanh file rieng")
+        if not target_path:
+            return
+        self.params = self.parameter_panel.get_data()
+        save_preset(target_path, self.params)
+        self._store_shared_params()
+        messagebox.showinfo(
+            "Preset",
+            "Da luu preset test tai:\n{}\n\nPreset goc trong thu muc presets khong bi thay doi.".format(target_path),
+        )
+
+    def load_preset_as(self):
+        target_path = ask_load_preset_path(HOUGH_PRESET_PATH, "Nap Hough preset tu file rieng")
+        if not target_path:
+            return
+        self.params = load_preset(target_path, DEFAULT_HOUGH_PARAMS)
+        self.parameter_panel.set_data(self.params)
+        self._store_shared_params()
+        messagebox.showinfo(
+            "Preset",
+            "Da nap preset test tu:\n{}\n\nPreset goc trong thu muc presets khong bi ghi de.".format(target_path),
+        )
 
     def reset_params(self):
         self.parameter_panel.set_data(DEFAULT_HOUGH_PARAMS)
+        self.params = self.parameter_panel.get_data()
+        self._store_shared_params()
 
     def run_step(self):
+        self.params = self.parameter_panel.get_data()
+        if self.input_mode_var.get() == MODE_FOLDER:
+            if not self.folder_images:
+                messagebox.showwarning("Thieu thu muc", "Hay chon thu muc anh truoc.")
+                return
+            self._run_folder_index(self.folder_index)
+            return
         image_path = self.image_path_var.get().strip()
         if not image_path:
             messagebox.showwarning("Thieu anh", "Hay chon anh khay truoc.")
             return
-        self.params = self.parameter_panel.get_data()
-        self._request_run(image_path, self.params)
+        self._request_run(image_path, self.params, stt=1, image_name=Path(image_path).name)
 
-    def _request_run(self, image_path, params):
-        request = {"image_path": image_path, "params": params}
+    def _request_run(self, image_path, params, stt=1, image_name=""):
+        request = {
+            "image_path": image_path,
+            "params": params,
+            "stt": stt,
+            "image_name": image_name or Path(image_path).name,
+        }
         if self._busy:
             self._pending = request
             self.status_var.set("Dang chay... se cap nhat lai")
@@ -227,6 +400,7 @@ class HoughStepPanel(StepPanelBase):
         self.set_result(result)
         if result["success"]:
             self._apply_summary(result, request["params"])
+            self._update_overview(request, result)
             self.app.shared["image_path"] = request["image_path"]
             self.app.shared["hough_result"] = result
             self.app.shared["hough_params"] = request["params"]

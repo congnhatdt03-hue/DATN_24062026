@@ -8,6 +8,7 @@ from src.pipeline_runner import run_step_radial
 from src.preset_store import load_preset, save_preset
 
 from .common_widgets import StepPanelBase
+from .preset_dialogs import ask_load_preset_path, ask_save_preset_path
 
 
 FIELD_SPECS = [
@@ -48,6 +49,8 @@ class RadialStepPanel(StepPanelBase):
         ttk.Button(self.toolbar, text="Run", command=self.run_step).pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Save Preset", command=self.save_preset).pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Load Preset", command=self.load_preset_file).pack(side="left", padx=3)
+        ttk.Button(self.toolbar, text="Save As...", command=self.save_preset_as).pack(side="left", padx=3)
+        ttk.Button(self.toolbar, text="Load As...", command=self.load_preset_as).pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Reset", command=self.reset_params).pack(side="left", padx=3)
         self.refresh_ids()
 
@@ -58,17 +61,48 @@ class RadialStepPanel(StepPanelBase):
         if ids and not self.roi_id_var.get():
             self.roi_id_var.set(ids[0])
 
+    def _store_shared_params(self):
+        self.app.shared["radial_params"] = self.params
+
     def save_preset(self):
         self.params = self.parameter_panel.get_data()
         save_preset(RADIAL_PRESET_PATH, self.params)
+        self._store_shared_params()
         messagebox.showinfo("Preset", "Da luu radial_preset.json")
 
     def load_preset_file(self):
         self.params = load_preset(RADIAL_PRESET_PATH, DEFAULT_RADIAL_PARAMS)
         self.parameter_panel.set_data(self.params)
+        self._store_shared_params()
+
+    def save_preset_as(self):
+        target_path = ask_save_preset_path(RADIAL_PRESET_PATH, "Luu Radial preset thanh file rieng")
+        if not target_path:
+            return
+        self.params = self.parameter_panel.get_data()
+        save_preset(target_path, self.params)
+        self._store_shared_params()
+        messagebox.showinfo(
+            "Preset",
+            "Da luu preset test tai:\n{}\n\nPreset goc trong thu muc presets khong bi thay doi.".format(target_path),
+        )
+
+    def load_preset_as(self):
+        target_path = ask_load_preset_path(RADIAL_PRESET_PATH, "Nap Radial preset tu file rieng")
+        if not target_path:
+            return
+        self.params = load_preset(target_path, DEFAULT_RADIAL_PARAMS)
+        self.parameter_panel.set_data(self.params)
+        self._store_shared_params()
+        messagebox.showinfo(
+            "Preset",
+            "Da nap preset test tu:\n{}\n\nPreset goc trong thu muc presets khong bi ghi de.".format(target_path),
+        )
 
     def reset_params(self):
         self.parameter_panel.set_data(DEFAULT_RADIAL_PARAMS)
+        self.params = self.parameter_panel.get_data()
+        self._store_shared_params()
 
     def run_step(self):
         self.refresh_ids()
