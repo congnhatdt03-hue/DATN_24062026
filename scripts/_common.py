@@ -13,16 +13,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.config import (  # noqa: E402
     DEFAULT_HOUGH_PARAMS,
-    DEFAULT_RADIAL_PARAMS,
     DEFAULT_ROI_PARAMS,
-    DEFAULT_TAB_EDGE_PARAMS,
     HOUGH_PRESET_PATH,
     INPUT_DIR,
     OUTPUT_DIR,
-    RADIAL_PRESET_PATH,
     ROI_DIR,
     ROI_PRESET_PATH,
-    TAB_EDGE_PRESET_PATH,
     TEMPLATE_DATA_PATH,
     TEMPLATE_DIR,
 )
@@ -36,7 +32,7 @@ from src.pipeline_runner import (  # noqa: E402
     run_step_tab_edges,
     run_step_template,
 )
-from src.preset_store import ensure_default_presets, load_preset  # noqa: E402
+from src.preset_store import ensure_default_presets, load_preset, load_radial_signature_preset  # noqa: E402
 from src.roi_extractor import save_rois  # noqa: E402
 from src.template_builder import load_template_data, save_template_data  # noqa: E402
 from src.visualization import save_debug_images  # noqa: E402
@@ -50,11 +46,12 @@ def bootstrap():
 
 def load_standard_presets():
     """Load all standard presets with defaults merged."""
+    radial_signature = load_radial_signature_preset()
     return {
         "hough": load_preset(HOUGH_PRESET_PATH, DEFAULT_HOUGH_PARAMS),
         "roi": load_preset(ROI_PRESET_PATH, DEFAULT_ROI_PARAMS),
-        "tab_edge": load_preset(TAB_EDGE_PRESET_PATH, DEFAULT_TAB_EDGE_PARAMS),
-        "radial": load_preset(RADIAL_PRESET_PATH, DEFAULT_RADIAL_PARAMS),
+        "tab_edge": radial_signature["tab_edge_params"],
+        "radial": radial_signature["radial_params"],
     }
 
 

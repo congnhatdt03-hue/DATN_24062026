@@ -129,7 +129,7 @@ class HoughStepPanel(StepPanelBase):
         self.table_section = ttk.Frame(self.left_panel)
         self.table_section.pack(side="bottom", fill="x", pady=(8, 0))
         ttk.Label(self.table_section, text="Bang ket qua circle").pack(anchor="w", pady=(0, 4))
-        self.table = ResultTable(self.table_section, ["ID", "center_x", "center_y", "radius", "score"], height=6)
+        self.table = ResultTable(self.table_section, ["ID", "center_x", "center_y", "radius", "score", "support_pct"], height=6)
         self.table.pack(fill="x")
 
     def _configure_table_columns(self):
@@ -139,6 +139,7 @@ class HoughStepPanel(StepPanelBase):
             "center_y": 120,
             "radius": 100,
             "score": 100,
+            "support_pct": 100,
         }
         for name, width in width_map.items():
             self.table.tree.column(name, width=width, anchor="center")
@@ -424,6 +425,7 @@ class HoughStepPanel(StepPanelBase):
                 int(round(float(item.get("y", item.get("center_y", 0))))),
                 int(round(float(item.get("r", item.get("radius", 0))))),
                 round(float(item.get("score", 0.0)), 4),
+                round(float(item.get("support_pct", 0.0)), 1),
             )
             for index, item in enumerate(circles, start=1)
         ]

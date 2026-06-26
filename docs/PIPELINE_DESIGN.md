@@ -47,7 +47,8 @@ Tu anh khay tim tam va ban kinh 12 stator.
 
 ### Dau ra
 
-- `circles`: `list[dict]` voi cau truc `{id, x, y, r, score}`.
+- `circles`: `list[dict]` voi cau truc `{id, x, y, r, score, support_pct}`.
+- Bang tab 1 nen hien them `support_pct` de theo doi muc do edge coverage cua tung vong tron Hough.
 - `hough_preset.json`.
 - Anh debug cua buoc 1.
 
@@ -212,6 +213,7 @@ Tao du lieu mau de so khop goc.
   - `template_tab_edges.png`
   - `template_radial_rays.png`
   - `template_signature.png`
+  - them mot mode xem ROI goc co overlay truc toa do XY, tam trung voi tam anh va truc keo dai qua bien stator.
 
 ## Buoc 6: So khop MSE
 
@@ -225,8 +227,9 @@ Tinh goc lech giua ROI test va mau.
 - Load `template_signature`.
 - Dich vong signature tu 0 den 359 do.
 - Tinh MSE tung goc.
-- `angle_deg` la goc co MSE nho nhat.
-- Co the noi suy parabol quanh cuc tieu.
+- `goc_tho_deg` la goc discrete ung voi chi so MSE nho nhat.
+- Noi suy parabol quanh cuc tieu de tinh `goc_tinh_deg`.
+- `angle_deg` la gia tri goc tinh cuoi cung de giu compatibility cho cac buoc sau.
 
 ### GUI can hien thi
 
@@ -234,14 +237,19 @@ Tinh goc lech giua ROI test va mau.
 - tab_edges test
 - radial rays test
 - do thi MSE
-- `angle_deg`
+- thong tin mau in dam ben ngoai bang ket qua
+- `goc_tho_deg`
+- `goc_tinh_deg`
 - `min_error`
+- Tren man hinh, cac goc hien thi theo thang signed `-180 .. 180`; du lieu noi bo van co the giu quy uoc `0 .. 360` de phuc vu tinh toan / compatibility.
 
 ### Dau ra
 
 - `match_result`
 - `mse_curve`
 - `best_angle`
+- `goc_tho_deg`
+- `goc_tinh_deg`
 
 ## Buoc 7: Tong hop
 

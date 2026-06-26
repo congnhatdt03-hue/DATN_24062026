@@ -153,6 +153,8 @@ def run_step_matching(roi_item, template_data, tab_edge_params, radial_params):
             "success": True,
             "data": {
                 "angle_deg": match_result["angle_deg"],
+                "coarse_angle_deg": match_result["coarse_angle_deg"],
+                "refined_angle_deg": match_result["refined_angle_deg"],
                 "min_error": match_result["min_error"],
                 "mse_curve": match_result["mse_curve"],
                 "signature_raw": radial_result["data"]["signature_raw"],

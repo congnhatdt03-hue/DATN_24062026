@@ -16,6 +16,7 @@ HOUGH_PRESET_PATH = PRESET_DIR / "hough_preset.json"
 ROI_PRESET_PATH = PRESET_DIR / "roi_preset.json"
 TAB_EDGE_PRESET_PATH = PRESET_DIR / "tab_edge_preset.json"
 RADIAL_PRESET_PATH = PRESET_DIR / "radial_preset.json"
+RADIAL_SIGNATURE_PRESET_PATH = PRESET_DIR / "radial_signature_preset.json"
 TEMPLATE_DATA_PATH = PRESET_DIR / "template_data.json"
 TEMPLATE_ROI_PATH = PRESET_DIR / "template_roi.png"
 
@@ -78,6 +79,14 @@ DEFAULT_ROI_PARAMS = {
             "min_radius_scale": 0.78,
             "max_radius_scale": 1.18,
             "max_center_shift_scale": 0.45,
+        },
+        "least_squares": {
+            "enabled": False,
+            "band_width_px": 3.0,
+            "min_points": 24,
+            "max_center_shift_scale": 0.12,
+            "max_radius_delta_scale": 0.12,
+            "score_tolerance": 0.02,
         },
         "score": {
             "ring_width": 3,

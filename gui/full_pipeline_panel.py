@@ -12,19 +12,16 @@ from tkinter import filedialog, messagebox, ttk
 
 from src.config import (
     DEFAULT_HOUGH_PARAMS,
-    DEFAULT_RADIAL_PARAMS,
     DEFAULT_ROI_PARAMS,
-    DEFAULT_TAB_EDGE_PARAMS,
     HOUGH_PRESET_PATH,
     INPUT_DIR,
-    RADIAL_PRESET_PATH,
     ROI_PRESET_PATH,
-    TAB_EDGE_PRESET_PATH,
     TEMPLATE_DATA_PATH,
 )
 from src.pipeline_runner import run_full_pipeline
-from src.preset_store import load_preset
+from src.preset_store import load_preset, load_radial_signature_preset
 from src.template_builder import load_template_data
+from src.visualization import normalize_display_angle_deg
 
 from .common_widgets import ResultTable, StepPanelBase
 
@@ -116,12 +113,13 @@ class FullPipelinePanel(StepPanelBase):
                 messagebox.showwarning("Template", "Chua co template. Hay tao o tab 5. ({})".format(exc))
                 return
         self.template_data = template_data
+        preset_bundle = load_radial_signature_preset()
         request = {
             "image_path": image_path,
             "hough_params": self.app.shared.get("hough_params") or load_preset(HOUGH_PRESET_PATH, DEFAULT_HOUGH_PARAMS),
             "roi_params": self.app.shared.get("roi_params") or load_preset(ROI_PRESET_PATH, DEFAULT_ROI_PARAMS),
-            "tab_edge_params": self.app.shared.get("tab_edge_params") or load_preset(TAB_EDGE_PRESET_PATH, DEFAULT_TAB_EDGE_PARAMS),
-            "radial_params": self.app.shared.get("radial_params") or load_preset(RADIAL_PRESET_PATH, DEFAULT_RADIAL_PARAMS),
+            "tab_edge_params": self.app.shared.get("tab_edge_params") or preset_bundle["tab_edge_params"],
+            "radial_params": self.app.shared.get("radial_params") or preset_bundle["radial_params"],
             "template_data": template_data,
         }
         self._start_worker(request)
@@ -181,7 +179,7 @@ class FullPipelinePanel(StepPanelBase):
                     int(round(row["center_x"])),
                     int(round(row["center_y"])),
                     int(round(row["radius"])),
-                    round(row["angle_deg"], 2),
+                    round(normalize_display_angle_deg(row["angle_deg"]), 2),
                     round(row["min_error"], 4),
                     row["status"],
                 )

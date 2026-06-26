@@ -39,19 +39,31 @@ def match_by_mse(signature_current, signature_template, invert_angle=False):
     best_index = int(np.argmin(curve))
     offset = refine_angle_parabolic(curve, best_index)
     angle_step = 360.0 / float(len(curve))
-    angle_deg = (best_index + offset) * angle_step
+    coarse_angle_deg = best_index * angle_step
+    refined_angle_deg = (best_index + offset) * angle_step
     if invert_angle:
-        angle_deg = -angle_deg
-    angle_deg = float(angle_deg % 360.0)
+        coarse_angle_deg = -coarse_angle_deg
+        refined_angle_deg = -refined_angle_deg
+    coarse_angle_deg = float(coarse_angle_deg % 360.0)
+    refined_angle_deg = float(refined_angle_deg % 360.0)
     min_error = float(curve[best_index])
     return {
         "success": True,
-        "angle_deg": angle_deg,
+        "angle_deg": refined_angle_deg,
+        "coarse_angle_deg": coarse_angle_deg,
+        "refined_angle_deg": refined_angle_deg,
+        "best_index": best_index,
+        "parabolic_offset_step": float(offset),
+        "parabolic_offset_deg": float(offset * angle_step),
         "min_error": min_error,
         "mse_curve": curve,
         "logs": [
             "Best MSE index: {} (+offset {:.3f})".format(best_index, offset),
-            "Goc xoay ROI so voi mau: {:.3f} do (invert={})".format(angle_deg, invert_angle),
+            "Goc tho: {:.3f} deg | Goc tinh: {:.3f} deg (invert={})".format(
+                coarse_angle_deg,
+                refined_angle_deg,
+                invert_angle,
+            ),
             "Min error: {:.6f}".format(min_error),
         ],
     }

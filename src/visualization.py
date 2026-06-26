@@ -9,6 +9,14 @@ import numpy as np
 from .io_utils import ensure_dir, write_image
 
 
+def normalize_display_angle_deg(angle_deg):
+    """Convert an angle to the user-facing signed range [-180, 180]."""
+    angle = ((float(angle_deg) + 180.0) % 360.0) - 180.0
+    if abs(angle + 180.0) < 1e-9 and float(angle_deg) > 0.0:
+        return 180.0
+    return float(angle)
+
+
 def cv_bgr_to_rgb(image):
     """Convert BGR or grayscale OpenCV image to RGB."""
     if image is None:
@@ -94,6 +102,71 @@ def _draw_text_with_outline(image, text, org, font_scale, color, thickness):
     )
 
 
+def draw_center_axes_overlay(image, center=None, margin_ratio=0.05):
+    """Overlay a clean XY axis view centered on the image (or a provided point)."""
+    if image is None:
+        return None
+    if len(image.shape) == 2:
+        base = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    else:
+        base = image.copy()
+
+    height, width = base.shape[:2]
+    if height <= 0 or width <= 0:
+        return base
+
+    if center is None:
+        center = ((width - 1) / 2.0, (height - 1) / 2.0)
+    cx = int(round(float(center[0])))
+    cy = int(round(float(center[1])))
+    cx = max(0, min(width - 1, cx))
+    cy = max(0, min(height - 1, cy))
+
+    margin_x = max(12, int(round(width * float(margin_ratio))))
+    margin_y = max(12, int(round(height * float(margin_ratio))))
+    x_left = (margin_x, cy)
+    x_right = (max(margin_x, width - margin_x - 1), cy)
+    y_top = (cx, margin_y)
+    y_bottom = (cx, max(margin_y, height - margin_y - 1))
+
+    max_dim = max(height, width)
+    thickness = max(2, int(round(max_dim / 380.0)))
+    outline = thickness + 2
+    font_scale = max(0.48, float(max_dim) / 1550.0)
+    text_thickness = max(1, int(round(thickness * 0.8)))
+    tip_length = 0.024
+
+    x_color = (0, 186, 255)
+    y_color = (255, 214, 64)
+    neg_x_color = (90, 140, 170)
+    neg_y_color = (120, 150, 95)
+    origin_color = (255, 255, 255)
+
+    overlay = base.copy()
+
+    cv2.line(overlay, x_left, (cx, cy), (18, 18, 18), outline, cv2.LINE_AA)
+    cv2.line(overlay, (cx, cy), x_right, (18, 18, 18), outline, cv2.LINE_AA)
+    cv2.line(overlay, (cx, cy), y_top, (18, 18, 18), outline, cv2.LINE_AA)
+    cv2.line(overlay, (cx, cy), y_bottom, (18, 18, 18), outline, cv2.LINE_AA)
+
+    cv2.line(overlay, x_left, (cx, cy), neg_x_color, thickness, cv2.LINE_AA)
+    cv2.arrowedLine(overlay, (cx, cy), x_right, x_color, thickness, cv2.LINE_AA, tipLength=tip_length)
+    cv2.arrowedLine(overlay, (cx, cy), y_top, y_color, thickness, cv2.LINE_AA, tipLength=tip_length)
+    cv2.line(overlay, (cx, cy), y_bottom, neg_y_color, thickness, cv2.LINE_AA)
+
+    cv2.circle(overlay, (cx, cy), outline + 1, (18, 18, 18), -1, cv2.LINE_AA)
+    cv2.circle(overlay, (cx, cy), max(3, thickness + 1), origin_color, -1, cv2.LINE_AA)
+
+    x_label_pos = (max(4, x_right[0] - 34), max(20, cy - 10))
+    y_label_pos = (min(width - 26, cx + 10), max(22, y_top[1] + 20))
+    origin_label_pos = (min(width - 28, cx + 8), min(height - 8, cy + 20))
+    _draw_text_with_outline(overlay, "+X", x_label_pos, font_scale, x_color, text_thickness)
+    _draw_text_with_outline(overlay, "+Y", y_label_pos, font_scale, y_color, text_thickness)
+    _draw_text_with_outline(overlay, "O", origin_label_pos, font_scale * 0.92, origin_color, text_thickness)
+
+    return cv2.addWeighted(overlay, 0.92, base, 0.08, 0)
+
+
 def draw_circles(image, circles, color=(0, 255, 0), draw_ids=True, adaptive_style=False):
     """Draw detected circles on an image."""
     output = image.copy()
@@ -175,6 +248,7 @@ def draw_final_results(image, results):
         y = int(round(result["center_y"]))
         r = int(round(result["radius"]))
         angle_deg = float(result.get("angle_deg", 0.0))
+        angle_display_deg = normalize_display_angle_deg(angle_deg)
         status = str(result.get("status", "ok"))
         ring_color = (0, 255, 0) if status == "ok" else (0, 0, 255)
         cv2.circle(output, (x, y), r, ring_color, style["circle_thickness"], cv2.LINE_AA)
@@ -191,7 +265,7 @@ def draw_final_results(image, results):
         id_y = max(text_h + 6, y - r - int(round(style["marker_size"] * 0.5)))
         _draw_text_with_outline(output, id_label, (id_x, id_y), id_font_scale, (0, 255, 255), style["text_thickness"])
 
-        angle_label = "{:.1f} deg {}".format(angle_deg, status)
+        angle_label = "{:.1f} deg {}".format(angle_display_deg, status)
         angle_y = min(output.shape[0] - 8, y + r + int(round(style["marker_size"] * 0.9)))
         _draw_text_with_outline(output, angle_label, (max(4, x - r), angle_y), style["font_scale"], (255, 255, 0), style["text_thickness"])
     return output

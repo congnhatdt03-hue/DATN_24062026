@@ -1,8 +1,8 @@
 """GUI panel for step 6: MSE matching by detected stator ID.
 
 Bo cuc: anh ghep mau|test o khung anh chinh (trai-tren), do thi so khop o trai-duoi,
-bang ket qua tich luy o cot phai (thay cho Log). Moi lan Run them mot dong test, hang
-"mau" luon ghim tren dau de nhin tong quat goc cua tat ca stator.
+cot phai la thong tin mau in dam + bang ket qua so khop tich luy. Moi lan Run them
+mot dong test de nhin tong quat goc cua tat ca stator.
 """
 
 import io
@@ -14,38 +14,41 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from src.config import (
-    DEFAULT_RADIAL_PARAMS,
     DEFAULT_ROI_PARAMS,
-    DEFAULT_TAB_EDGE_PARAMS,
     INPUT_DIR,
-    RADIAL_PRESET_PATH,
     ROI_PRESET_PATH,
-    TAB_EDGE_PRESET_PATH,
     TEMPLATE_DATA_PATH,
 )
 from src.io_utils import read_image
 from src.pipeline_runner import run_step_matching
-from src.preset_store import load_preset
+from src.preset_store import load_preset, load_radial_signature_preset
 from src.roi_extractor import build_roi_item_from_image
 from src.template_builder import load_template_bundle
-from src.visualization import make_pair_view
+from src.visualization import make_pair_view, normalize_display_angle_deg
 
 from .common_widgets import ImageViewer, ResultTable, StepPanelBase
 from .preset_dialogs import ask_load_json_path
 
 
-def _match_figure(mse_curve, template_norm, current_norm, angle_deg):
+def _match_figure(mse_curve, template_norm, current_norm, coarse_angle_deg, refined_angle_deg):
     """Render the angle-error curve and the Ref-vs-current signature overlay."""
     curve = np.asarray(mse_curve, dtype=float)
     n = len(curve)
     idx = np.arange(n)
     signed = np.where(idx <= n // 2, idx, idx - n).astype(float)
     order = np.argsort(signed)
+    coarse_display = normalize_display_angle_deg(coarse_angle_deg)
+    refined_display = normalize_display_angle_deg(refined_angle_deg)
 
     figure, axes = plt.subplots(2, 1, figsize=(7.6, 5.2), dpi=120)
     axes[0].plot(signed[order], curve[order], color="#0ea5e9", linewidth=1.6)
     axes[0].axvline(float(signed[int(np.argmin(curve))]), color="#64748b", linewidth=1.0)
-    axes[0].set_title("Do thi sai so binh phuong theo goc (min @ {:.2f} deg)".format(angle_deg))
+    axes[0].set_title(
+        "Do thi sai so binh phuong theo goc (tho {:.2f} deg -> tinh {:.2f} deg)".format(
+            coarse_display,
+            refined_display,
+        )
+    )
     axes[0].set_xlabel("Goc lech (deg)")
     axes[0].set_ylabel("Sai so")
     axes[0].grid(True, alpha=0.25)
@@ -85,11 +88,11 @@ class MatchingStepPanel(StepPanelBase):
         ttk.Button(self.toolbar, text="Load Template", command=self.load_template).pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Load Template File...", command=self.load_template_file).pack(side="left", padx=3)
         ttk.Button(self.toolbar, text="Run", command=self.run_step).pack(side="left", padx=3)
-        ttk.Button(self.toolbar, text="Xoa bang", command=self.clear_table).pack(side="left", padx=3)
 
         self._build_plot_area()
         self._build_right_table()
         self.refresh_ids()
+        self._rebuild_table()
 
     def _build_plot_area(self):
         """Khung do thi so khop nam o trai-duoi (cho bang ket qua cu)."""
@@ -105,15 +108,31 @@ class MatchingStepPanel(StepPanelBase):
         self.parameter_panel.pack_forget()
         self.log_label.pack_forget()
         self.log_panel.pack_forget()
-        ttk.Label(self.right_panel, text="Bang ket qua so khop (mau ghim tren dau)").pack(anchor="w", pady=(2, 4))
+        ttk.Label(self.right_panel, text="Bang ket qua so khop").pack(anchor="w", pady=(2, 2))
+        self.template_info_var = tk.StringVar(value="Mau: chua nap template.")
+        ttk.Label(
+            self.right_panel,
+            textvariable=self.template_info_var,
+            font=("TkDefaultFont", 9, "bold"),
+            wraplength=420,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 6))
         self.table = ResultTable(
             self.right_panel,
-            ["doi tuong", "center_x", "center_y", "radius", "angle_deg", "min_error"],
+            ["doi tuong", "center_x", "center_y", "radius", "goc_tho_deg", "goc_tinh_deg", "min_error"],
             height=14,
         )
         self.table.pack(fill="x")
-        self.log_label.pack(anchor="w", pady=(8, 4))
-        self.log_panel.pack(fill="both", expand=True)
+        self.table.tree.column("doi tuong", width=96, anchor="center")
+        self.table.tree.column("center_x", width=72, anchor="center")
+        self.table.tree.column("center_y", width=72, anchor="center")
+        self.table.tree.column("radius", width=68, anchor="center")
+        self.table.tree.column("goc_tho_deg", width=88, anchor="center")
+        self.table.tree.column("goc_tinh_deg", width=88, anchor="center")
+        self.table.tree.column("min_error", width=80, anchor="center")
+        actions = ttk.Frame(self.right_panel)
+        actions.pack(fill="x", pady=(6, 0))
+        ttk.Button(actions, text="Xoa bang", command=self.clear_table).pack(side="right")
 
     def refresh_ids(self):
         """Populate the stator ID combobox from the ROI step result."""
@@ -155,7 +174,7 @@ class MatchingStepPanel(StepPanelBase):
             messagebox.showerror("Template", str(exc))
 
     def clear_table(self):
-        """Reset cac dong test da tich luy (giu lai hang mau)."""
+        """Reset cac dong test da tich luy."""
         self._result_rows = {}
         self._rebuild_table()
 
@@ -204,14 +223,25 @@ class MatchingStepPanel(StepPanelBase):
         )
 
     def _rebuild_table(self):
-        """Hang mau ghim tren dau, cac dong test tich luy ben duoi theo ID tang dan."""
-        template = self.template_data or {}
-        t_center = template.get("center_full") or template.get("center", [0.0, 0.0])
-        t_radius = float(template.get("radius_full", template.get("radius", 0.0)))
-        t_id = template.get("source_id", "-")
-        rows = [("mau ID{}".format(t_id), int(round(t_center[0])), int(round(t_center[1])), int(round(t_radius)), "", "")]
-        for entry in sorted(self._result_rows.values(), key=lambda item: item["sort_key"]):
-            rows.append(entry["row"])
+        """Cap nhat dong thong tin mau va cac dong test tich luy theo ID tang dan."""
+        template = self.template_data or self.app.shared.get("template_data") or {}
+        if self.template_data is None and template:
+            self.template_data = template
+        if template:
+            t_center = template.get("center_full") or template.get("center", [0.0, 0.0])
+            t_radius = float(template.get("radius_full", template.get("radius", 0.0)))
+            t_id = template.get("source_id", "-")
+            self.template_info_var.set(
+                "Mau ID{} | center=({}, {}) | radius={}".format(
+                    t_id,
+                    int(round(float(t_center[0]))),
+                    int(round(float(t_center[1]))),
+                    int(round(t_radius)),
+                )
+            )
+        else:
+            self.template_info_var.set("Mau: chua nap template.")
+        rows = [entry["row"] for entry in sorted(self._result_rows.values(), key=lambda item: item["sort_key"])]
         self.table.set_rows(rows)
 
     def _record_result(self, roi_item, match_data):
@@ -224,7 +254,8 @@ class MatchingStepPanel(StepPanelBase):
                 int(round(test_cx)),
                 int(round(test_cy)),
                 int(round(float(roi_item.get("radius_full", roi_item.get("radius", 0.0))))),
-                round(float(match_data["angle_deg"]), 2),
+                round(normalize_display_angle_deg(match_data["coarse_angle_deg"]), 2),
+                round(normalize_display_angle_deg(match_data["refined_angle_deg"]), 2),
                 round(float(match_data["min_error"]), 4),
             ),
         }
@@ -246,14 +277,16 @@ class MatchingStepPanel(StepPanelBase):
         except Exception as exc:
             messagebox.showwarning("Matching", str(exc))
             return
-        tab_params = self.app.shared.get("tab_edge_params") or load_preset(TAB_EDGE_PRESET_PATH, DEFAULT_TAB_EDGE_PARAMS)
-        radial_params = self.app.shared.get("radial_params") or load_preset(RADIAL_PRESET_PATH, DEFAULT_RADIAL_PARAMS)
+        preset_bundle = load_radial_signature_preset()
+        tab_params = self.app.shared.get("tab_edge_params") or preset_bundle["tab_edge_params"]
+        radial_params = self.app.shared.get("radial_params") or preset_bundle["radial_params"]
         result = run_step_matching(roi_item, self.template_data, tab_params, radial_params)
         roi_logs = roi_item.get("logs") or []
         if roi_logs:
             result["logs"] = list(roi_logs) + list(result.get("logs", []))
         if not result["success"]:
             self.set_result(result)
+            messagebox.showwarning("Matching", "\n".join(result.get("logs", ["Matching that bai."])))
             return
 
         match_data = result["data"]
@@ -268,7 +301,8 @@ class MatchingStepPanel(StepPanelBase):
             match_data["mse_curve"],
             self.template_data.get("signature_norm", []),
             match_data["signature_norm"],
-            float(match_data["angle_deg"]),
+            float(match_data["coarse_angle_deg"]),
+            float(match_data["refined_angle_deg"]),
         )
         display = {
             "ket_qua": pair_view,

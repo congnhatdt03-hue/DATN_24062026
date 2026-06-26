@@ -66,6 +66,7 @@ Tai lieu nay mo ta GUI moi cho `detect_stator`, tap trung vao kha nang debug tun
 - Tham so tien xu ly va Hough duoc nhom ro.
 - Hien 4 anh debug: goc, tien xu ly, candidates, filtered.
 - Log so luong circle truoc va sau loc.
+- Bang ket qua circle nen co them `support_pct` de nguoi dung giam sat muc do khop hien tai cua moi vong tron.
 
 ### RoiStepPanel
 
@@ -93,11 +94,14 @@ Tai lieu nay mo ta GUI moi cho `detect_stator`, tap trung vao kha nang debug tun
 
 - Tao va luu template 0 do.
 - Xem anh debug va metadata cua template.
+- Co them mot mode `Anh debug` de xem ROI goc kem truc toa do XY, tam dat tai tam anh va truc keo dai gan het khung hinh.
 
 ### MatchingStepPanel
 
 - Hien ROI test, `tab_edges`, radial rays, va do thi MSE.
-- Hien `angle_deg` va `min_error`.
+- Hien thong tin mau o mot dong tom tat in dam ben ngoai bang ket qua.
+- Bang ket qua co `goc_tho_deg`, `goc_tinh_deg`, va `min_error`.
+- Cac gia tri goc hien tren GUI nen dung quy uoc signed `-180 .. 180` de de doc cho nguoi van hanh.
 
 ### FullPipelinePanel
 

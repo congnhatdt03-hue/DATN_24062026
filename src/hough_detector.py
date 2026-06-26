@@ -84,6 +84,44 @@ def _edge_score(edges, cx, cy, radius, ring_width=3):
     return float((edges[sample_y[valid], sample_x[valid]] > 0).sum()) / float(valid_count)
 
 
+def _edge_coverage_pct(edges, cx, cy, radius, band_width=3, angle_count=360, patch_radius=1):
+    """Measure how many directions around the circle have edge support."""
+    if edges is None or edges.size == 0:
+        return 0.0
+    radius = float(radius)
+    if radius < 4.0:
+        return 0.0
+    band_width = max(1, int(round(float(band_width))))
+    angle_count = max(12, int(round(float(angle_count))))
+    patch_radius = max(0, int(round(float(patch_radius))))
+    height, width = edges.shape[:2]
+
+    hit_count = 0
+    for index in range(angle_count):
+        angle = (2.0 * math.pi * index) / float(angle_count)
+        cos_angle = math.cos(angle)
+        sin_angle = math.sin(angle)
+        hit = False
+        for delta_radius in range(-band_width, band_width + 1):
+            sample_radius = radius + float(delta_radius)
+            if sample_radius <= 0.0:
+                continue
+            sample_x = int(round(float(cx) + sample_radius * cos_angle))
+            sample_y = int(round(float(cy) + sample_radius * sin_angle))
+            if sample_x < 0 or sample_y < 0 or sample_x >= width or sample_y >= height:
+                continue
+            x1 = max(0, sample_x - patch_radius)
+            x2 = min(width, sample_x + patch_radius + 1)
+            y1 = max(0, sample_y - patch_radius)
+            y2 = min(height, sample_y + patch_radius + 1)
+            if np.any(edges[y1:y2, x1:x2] > 0):
+                hit = True
+                break
+        if hit:
+            hit_count += 1
+    return (100.0 * float(hit_count)) / float(angle_count)
+
+
 def detect_hough_candidates(image, params):
     """Detect raw Hough candidates."""
     proc_image, proc_params, processing_scale, fast_logs = _prepare_fast_mode_input(image, params)
@@ -109,7 +147,16 @@ def detect_hough_candidates(image, params):
             continue
         for cx, cy, radius in np.round(circles[0]).astype(int):
             score = _edge_score(edges, cx, cy, radius)
-            candidates.append({"x": int(cx), "y": int(cy), "r": int(radius), "score": float(score)})
+            support_pct = _edge_coverage_pct(edges, cx, cy, radius, band_width=3)
+            candidates.append(
+                {
+                    "x": int(cx),
+                    "y": int(cy),
+                    "r": int(radius),
+                    "score": float(score),
+                    "support_pct": float(support_pct),
+                }
+            )
     if processing_scale < 1.0:
         scale_back = 1.0 / float(processing_scale)
         candidates = [_scale_circle_to_original(circle, scale_back) for circle in candidates]

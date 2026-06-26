@@ -73,6 +73,141 @@ def _score_circle(circle, edge_image, target_center, target_radius, score_cfg):
     return float(support - (center_weight * center_penalty) - (radius_weight * radius_penalty))
 
 
+def _edge_coverage_pct(edge_image, cx, cy, radius, band_width=3, angle_count=360, patch_radius=1):
+    """Measure how many directions around the circle have edge support."""
+    if edge_image is None or edge_image.size == 0:
+        return 0.0
+    radius = float(radius)
+    if radius < 4.0:
+        return 0.0
+    band_width = max(1, int(round(float(band_width))))
+    angle_count = max(12, int(round(float(angle_count))))
+    patch_radius = max(0, int(round(float(patch_radius))))
+    height, width = edge_image.shape[:2]
+
+    hit_count = 0
+    for index in range(angle_count):
+        angle = (2.0 * math.pi * index) / float(angle_count)
+        cos_angle = math.cos(angle)
+        sin_angle = math.sin(angle)
+        hit = False
+        for delta_radius in range(-band_width, band_width + 1):
+            sample_radius = radius + float(delta_radius)
+            if sample_radius <= 0.0:
+                continue
+            sample_x = int(round(float(cx) + sample_radius * cos_angle))
+            sample_y = int(round(float(cy) + sample_radius * sin_angle))
+            if (
+                sample_x < 0
+                or sample_y < 0
+                or sample_x >= width
+                or sample_y >= height
+            ):
+                continue
+            x1 = max(0, sample_x - patch_radius)
+            x2 = min(width, sample_x + patch_radius + 1)
+            y1 = max(0, sample_y - patch_radius)
+            y2 = min(height, sample_y + patch_radius + 1)
+            if np.any(edge_image[y1:y2, x1:x2] > 0):
+                hit = True
+                break
+        if hit:
+            hit_count += 1
+    return (100.0 * float(hit_count)) / float(angle_count)
+
+
+def _collect_ring_points(edge_image, circle, band_width_px):
+    """Collect edge pixels that lie close to one candidate circle."""
+    if edge_image is None or edge_image.size == 0:
+        return np.empty((0, 2), dtype=np.float64)
+    ys, xs = np.nonzero(edge_image > 0)
+    if xs.size == 0:
+        return np.empty((0, 2), dtype=np.float64)
+    cx, cy, radius = [float(value) for value in circle]
+    distances = np.hypot(xs.astype(np.float64) - cx, ys.astype(np.float64) - cy)
+    band = max(1.0, float(band_width_px))
+    keep = np.abs(distances - radius) <= band
+    if not np.any(keep):
+        return np.empty((0, 2), dtype=np.float64)
+    return np.column_stack((xs[keep].astype(np.float64), ys[keep].astype(np.float64)))
+
+
+def _fit_circle_least_squares(points):
+    """Fit a circle from 2D points with a linear least-squares estimate."""
+    if points is None or len(points) < 3:
+        return None
+    points_array = np.asarray(points, dtype=np.float64)
+    xs = points_array[:, 0]
+    ys = points_array[:, 1]
+    matrix_a = np.column_stack((xs, ys, np.ones(len(points_array), dtype=np.float64)))
+    matrix_b = -(xs ** 2 + ys ** 2)
+    try:
+        solution, _, _, _ = np.linalg.lstsq(matrix_a, matrix_b, rcond=None)
+    except TypeError:
+        solution, _, _, _ = np.linalg.lstsq(matrix_a, matrix_b)
+    coeff_a, coeff_b, coeff_c = solution
+    center_x = -float(coeff_a) / 2.0
+    center_y = -float(coeff_b) / 2.0
+    radius_sq = (center_x ** 2) + (center_y ** 2) - float(coeff_c)
+    if not np.isfinite(radius_sq) or radius_sq <= 0.0:
+        return None
+    radius = math.sqrt(radius_sq)
+    if not np.isfinite(radius) or radius <= 0.0:
+        return None
+    return (float(center_x), float(center_y), float(radius))
+
+
+def _refine_circle_by_least_squares(best_circle, best_score, masked_edges, coarse_center, coarse_radius, refine_cfg):
+    """Optionally refine the chosen circle by fitting nearby edge points."""
+    least_cfg = refine_cfg.get("least_squares", {})
+    if not least_cfg.get("enabled", False):
+        return best_circle, float(best_score), ["ROI refine LS: TAT"]
+
+    band_width_px = max(1.0, float(least_cfg.get("band_width_px", 3.0)))
+    min_points = max(3, int(round(float(least_cfg.get("min_points", 24)))))
+    max_center_shift = max(1.0, float(coarse_radius) * float(least_cfg.get("max_center_shift_scale", 0.12)))
+    max_radius_delta = max(1.0, float(coarse_radius) * float(least_cfg.get("max_radius_delta_scale", 0.12)))
+    score_tolerance = max(0.0, float(least_cfg.get("score_tolerance", 0.02)))
+
+    ring_points = _collect_ring_points(masked_edges, best_circle, band_width_px)
+    point_count = int(len(ring_points))
+    logs = ["ROI refine LS: {} diem canh trong band +/-{:.1f}px".format(point_count, band_width_px)]
+    if point_count < min_points:
+        logs.append("ROI refine LS: bo qua vi so diem < {}".format(min_points))
+        return best_circle, float(best_score), logs
+
+    fitted_circle = _fit_circle_least_squares(ring_points)
+    if fitted_circle is None:
+        logs.append("ROI refine LS: fit that bai, giu Hough refine")
+        return best_circle, float(best_score), logs
+
+    fitted_shift = math.hypot(float(fitted_circle[0]) - float(best_circle[0]), float(fitted_circle[1]) - float(best_circle[1]))
+    fitted_radius_delta = abs(float(fitted_circle[2]) - float(best_circle[2]))
+    logs.append(
+        "ROI refine LS: shift={:.2f}px, dR={:.2f}px".format(
+            fitted_shift,
+            fitted_radius_delta,
+        )
+    )
+    if fitted_shift > max_center_shift or fitted_radius_delta > max_radius_delta:
+        logs.append(
+            "ROI refine LS: bo qua vi vuot nguong shift/dR ({:.2f}px / {:.2f}px)".format(
+                max_center_shift,
+                max_radius_delta,
+            )
+        )
+        return best_circle, float(best_score), logs
+
+    fitted_score = _score_circle(fitted_circle, masked_edges, coarse_center, coarse_radius, refine_cfg.get("score", {}))
+    logs.append("ROI refine LS: score {:.4f} (Hough {:.4f})".format(fitted_score, float(best_score)))
+    if fitted_score + score_tolerance < float(best_score):
+        logs.append("ROI refine LS: bo qua vi score giam qua nguong cho phep")
+        return best_circle, float(best_score), logs
+
+    logs.append("ROI refine LS: chap nhan ket qua fit")
+    return fitted_circle, float(fitted_score), logs
+
+
 def _prepare_refine_image(roi, params):
     """Prepare the selected ROI for the local Hough pass."""
     gray = to_gray(roi)
@@ -269,12 +404,34 @@ def refine_circle_in_roi(roi, coarse_center, coarse_radius, params):
         else:
             logs.append("ROI refine: fallback ve circle tho")
 
+    if refine_cfg.get("enabled", True):
+        best_circle, best_score, ls_logs = _refine_circle_by_least_squares(
+            best_circle,
+            best_score,
+            masked_edges,
+            coarse_center,
+            coarse_radius,
+            refine_cfg,
+        )
+        logs.extend(ls_logs)
+    else:
+        logs.append("ROI refine LS: skip vi Hough refine dang tat")
+
+    support_pct = _edge_coverage_pct(
+        masked_edges,
+        best_circle[0],
+        best_circle[1],
+        best_circle[2],
+        band_width=score_cfg.get("ring_width", 3),
+    )
+    logs.append("ROI refine: edge coverage {:.1f}%".format(support_pct))
     detected_circle = (float(best_circle[0]), float(best_circle[1]), float(best_circle[2]), float(best_score))
     overlay = _draw_local_detected(roi, detected_circle)
     return {
         "center_in_roi": (float(best_circle[0]), float(best_circle[1])),
         "radius": float(best_circle[2]),
         "score": float(best_score),
+        "support_pct": float(support_pct),
         "images": {
             "selected_roi_preprocessed": preprocessed,
             "selected_roi_edges": edges,
@@ -310,7 +467,9 @@ def refine_roi_item(roi_item, params):
     item["center_y"] = full_center_y
     item["radius_full"] = full_radius
     item["score"] = float(refine_result["score"])
+    item["support_pct"] = float(refine_result.get("support_pct", 0.0))
     item["circle"] = _build_effective_circle(item, full_center_x, full_center_y, full_radius, item["score"])
+    item["circle"]["support_pct"] = item["support_pct"]
     item["refined"] = True
     item["debug"] = {**refine_result["images"]}
     item["logs"] = list(refine_result["logs"])
@@ -376,6 +535,7 @@ def save_rois(rois, output_dir=ROI_DIR):
     for item in rois:
         path = output_dir / "roi_stator_{:02d}.png".format(item["id"])
         write_image(path, item["roi"])
+        item["saved_path"] = str(path)
         saved_paths.append(str(path))
     return saved_paths
 

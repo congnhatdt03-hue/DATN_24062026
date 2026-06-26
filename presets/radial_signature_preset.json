@@ -1,0 +1,59 @@
+{
+  "tab_edge_params": {
+    "yolo": {
+      "enabled": true,
+      "model_path": "C:\\Users\\congn\\Desktop\\New folder (2)\\best.pt",
+      "conf_threshold": 0.77,
+      "box_padding_ratio": 0.0,
+      "box_padding_min_px": 0
+    },
+    "preprocess": {
+      "use_clahe": true,
+      "clahe_clip_limit": 3.6,
+      "blur_method": "gaussian",
+      "gaussian_kernel": 15,
+      "median_kernel": 12
+    },
+    "canny": {
+      "threshold1": 155,
+      "threshold2": 0
+    },
+    "contour_filter": {
+      "min_area": 1199,
+      "min_area_ratio": 0.0,
+      "min_keep_distance_ratio": 0.06,
+      "outer_profile_bin_deg": 2.64,
+      "max_point_gap_px": 10.86,
+      "max_angle_gap_deg": 8.15,
+      "radial_angle_tolerance_deg": 6.72
+    },
+    "morphology": {
+      "use_close": true,
+      "close_kernel": 5,
+      "close_iter": 1
+    }
+  },
+  "radial_params": {
+    "source_mode": "closed_edges",
+    "use_radius_band": true,
+    "inner_radius_scale": 0.99,
+    "outer_radius_scale": 1.34,
+    "use_source_dilate": true,
+    "source_dilate_kernel": 3,
+    "source_dilate_iter": 1,
+    "num_angles": 360,
+    "ray_step_px": 1.08,
+    "ray_thickness": 2,
+    "min_valid_radius_scale": 0.9,
+    "floor_to_radius": true,
+    "reject_outliers": false,
+    "outlier_window": 14,
+    "outlier_max_delta": 18.01,
+    "interpolate_missing": true,
+    "max_gap_to_interpolate": 18,
+    "smooth_signature": true,
+    "smooth_window": 7,
+    "scale_normalize": true,
+    "invert_angle": false
+  }
+}

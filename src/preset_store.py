@@ -10,6 +10,7 @@ from .config import (
     DEFAULT_ROI_PARAMS,
     DEFAULT_TAB_EDGE_PARAMS,
     HOUGH_PRESET_PATH,
+    RADIAL_SIGNATURE_PRESET_PATH,
     RADIAL_PRESET_PATH,
     ROI_PRESET_PATH,
     TAB_EDGE_PRESET_PATH,
@@ -51,6 +52,41 @@ def save_preset(path, data):
     return path_obj
 
 
+def default_radial_signature_preset():
+    """Return the default combined preset for tab-edges plus radial."""
+    return {
+        "tab_edge_params": copy.deepcopy(DEFAULT_TAB_EDGE_PARAMS),
+        "radial_params": copy.deepcopy(DEFAULT_RADIAL_PARAMS),
+    }
+
+
+def load_radial_signature_preset(path=RADIAL_SIGNATURE_PRESET_PATH):
+    """Load the combined tab-edge + radial preset with legacy fallback."""
+    path_obj = Path(path)
+    if path_obj.is_file():
+        payload = load_preset(path_obj, default_radial_signature_preset())
+        if isinstance(payload, dict):
+            tab_edge_payload = payload.get("tab_edge_params", payload.get("tab_edge", {}))
+            radial_payload = payload.get("radial_params", payload.get("radial", {}))
+            return {
+                "tab_edge_params": merge_dict(DEFAULT_TAB_EDGE_PARAMS, tab_edge_payload),
+                "radial_params": merge_dict(DEFAULT_RADIAL_PARAMS, radial_payload),
+            }
+    return {
+        "tab_edge_params": load_preset(TAB_EDGE_PRESET_PATH, DEFAULT_TAB_EDGE_PARAMS),
+        "radial_params": load_preset(RADIAL_PRESET_PATH, DEFAULT_RADIAL_PARAMS),
+    }
+
+
+def save_radial_signature_preset(path, tab_edge_params, radial_params):
+    """Save one JSON bundle for both tab-edge and radial settings."""
+    payload = {
+        "tab_edge_params": copy.deepcopy(tab_edge_params),
+        "radial_params": copy.deepcopy(radial_params),
+    }
+    return save_preset(path, payload)
+
+
 def ensure_default_presets():
     """Create default preset files when missing."""
     preset_map = {
@@ -62,4 +98,10 @@ def ensure_default_presets():
     for path, default in preset_map.items():
         if not Path(path).is_file():
             save_preset(path, default)
-
+    if not Path(RADIAL_SIGNATURE_PRESET_PATH).is_file():
+        legacy_bundle = load_radial_signature_preset()
+        save_radial_signature_preset(
+            RADIAL_SIGNATURE_PRESET_PATH,
+            legacy_bundle["tab_edge_params"],
+            legacy_bundle["radial_params"],
+        )

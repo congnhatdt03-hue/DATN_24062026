@@ -3,9 +3,10 @@
 import queue
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from src.config import DEFAULT_HOUGH_PARAMS, DEFAULT_ROI_PARAMS, HOUGH_PRESET_PATH, INPUT_DIR, ROI_PRESET_PATH
+from src.config import DEFAULT_HOUGH_PARAMS, DEFAULT_ROI_PARAMS, HOUGH_PRESET_PATH, INPUT_DIR, ROI_DIR, ROI_PRESET_PATH
 from src.pipeline_runner import run_step_hough, run_step_roi_crop, run_step_roi_refine
 from src.preset_store import load_preset, save_preset
 from src.roi_extractor import find_roi_item
@@ -18,6 +19,7 @@ FIELD_SPECS = [
     {"path": "half_size_scale", "label": "half_size_scale", "type": "float", "group": "ROI", "min": 0.8, "max": 2.8},
     {"path": "output_size", "label": "output_size", "type": "int", "group": "ROI", "min": 0, "max": 1024},
     {"path": "refine.enabled", "label": "Enable refine", "type": "bool", "group": "Hough Refine"},
+    {"path": "refine.least_squares.enabled", "label": "Use least-squares", "type": "bool", "group": "Hough Refine"},
     {"path": "refine.preprocess.use_clahe", "label": "Use CLAHE", "type": "bool", "group": "Preprocess"},
     {"path": "refine.preprocess.clahe_clip_limit", "label": "CLAHE clip", "type": "float", "group": "Preprocess", "min": 0.1, "max": 10.0},
     {"path": "refine.preprocess.clahe_tile_grid_size", "label": "CLAHE tile", "type": "int", "group": "Preprocess", "min": 1, "max": 32},
@@ -54,8 +56,15 @@ class RoiStepPanel(StepPanelBase):
         self._pending = None
         self._event_queue = queue.Queue()
         self._poll_id = None
+        self._source_image_path = ""
+        self._entry_shows_display_path = False
+        self._suspend_path_trace = False
+        self.current_images = {}
+        self.current_result = None
+        self._saved_debug_paths = {}
         super().__init__(master, app, FIELD_SPECS, self.params)
         self.image_path_var = tk.StringVar(value="")
+        self.image_path_var.trace_add("write", self._on_image_path_changed)
         self.roi_id_var = tk.StringVar()
         self.status_var = tk.StringVar(value="")
         self.debug_image_var = tk.StringVar()
@@ -100,16 +109,17 @@ class RoiStepPanel(StepPanelBase):
         self.table_section = ttk.Frame(self.left_panel)
         self.table_section.pack(side="bottom", fill="x", pady=(8, 0))
         ttk.Label(self.table_section, text="Bang ket qua ROI refine").pack(anchor="w", pady=(0, 4))
-        self.table = ResultTable(self.table_section, ["ID", "center_x", "center_y", "radius", "score"], height=6)
+        self.table = ResultTable(self.table_section, ["ID", "center_x", "center_y", "radius", "score", "support_pct"], height=6)
         self.table.pack(fill="x")
 
     def _configure_table_columns(self):
         width_map = {
             "ID": 70,
-            "center_x": 120,
-            "center_y": 120,
-            "radius": 100,
-            "score": 100,
+            "center_x": 110,
+            "center_y": 110,
+            "radius": 90,
+            "score": 85,
+            "support_pct": 100,
         }
         for name, width in width_map.items():
             self.table.tree.column(name, width=width, anchor="center")
@@ -133,8 +143,11 @@ class RoiStepPanel(StepPanelBase):
         image_key = self._display_to_image_key.get(display_name)
         if image_key in self.current_images:
             self.image_viewer.set_image(self.current_images[image_key])
+        self._show_current_image_path(image_key)
 
     def set_result(self, result):
+        self.current_result = result
+        self._saved_debug_paths = {}
         self.current_images = result.get("images", {}).copy()
         image_keys = list(self.current_images.keys())
         selected = self._set_debug_options(image_keys)
@@ -142,13 +155,16 @@ class RoiStepPanel(StepPanelBase):
         if image_key in self.current_images:
             self.image_viewer.set_image(self.current_images[image_key])
         elif image_keys:
-            self.image_viewer.set_image(self.current_images[image_keys[0]])
+            image_key = image_keys[0]
+            self.image_viewer.set_image(self.current_images[image_key])
+        self._show_current_image_path(image_key)
         self.log_panel.set_lines(result.get("logs", []))
 
     def choose_image(self):
         path = filedialog.askopenfilename(title="Chon anh khay", initialdir=str(INPUT_DIR))
         if path:
-            self.image_path_var.set(path)
+            self._source_image_path = path
+            self._set_image_path_entry(path, display_only=False)
             if self.auto_update_var.get():
                 self.run_step()
 
@@ -246,22 +262,44 @@ class RoiStepPanel(StepPanelBase):
         self.set_result(result)
 
     def save_selected_roi(self):
-        result = self.app.shared.get("roi_result")
+        result = self.current_result or self.app.shared.get("roi_result")
         if not result or not result["success"]:
-            messagebox.showwarning("Chua co ROI", "Hay run buoc ROI truoc.")
+            messagebox.showwarning("Chua co anh", "Hay run buoc ROI truoc.")
             return
-        roi_id = self.roi_id_var.get().strip()
-        for item in result["data"]["rois"]:
-            if str(item["id"]) == roi_id:
-                from src.io_utils import ROI_DIR, write_image
+        image_key = self._display_to_image_key.get(self.debug_image_var.get())
+        if not image_key:
+            messagebox.showwarning("Chua chon anh", "Hay chon anh debug can luu.")
+            return
+        image = self.current_images.get(image_key)
+        if image is None:
+            messagebox.showwarning("Khong co du lieu", "Anh debug hien tai chua co du lieu de luu.")
+            return
+        from src.io_utils import write_image
 
-                path = ROI_DIR / "roi_stator_{:02d}.png".format(item["id"])
-                write_image(path, item["roi"])
-                messagebox.showinfo("ROI", "Da luu {}".format(path.name))
-                return
+        current_path = self._resolve_display_path(image_key)
+        initial_dir = str(Path(current_path).parent) if current_path else str(ROI_DIR)
+        target_path = filedialog.asksaveasfilename(
+            title="Luu anh debug hien tai",
+            initialdir=initial_dir,
+            initialfile=self._suggest_debug_filename(image_key),
+            defaultextension=".png",
+            filetypes=[
+                ("PNG image", "*.png"),
+                ("JPEG image", "*.jpg *.jpeg"),
+                ("Bitmap image", "*.bmp"),
+                ("TIFF image", "*.tif *.tiff"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not target_path:
+            return
+        path = write_image(target_path, image)
+        self._saved_debug_paths[image_key] = str(path)
+        messagebox.showinfo("Save ROI", "Da luu anh debug tai:\n{}".format(path))
+        self._show_current_image_path(image_key)
 
     def run_step(self):
-        image_path = self.image_path_var.get().strip() or self.app.shared.get("image_path", "")
+        image_path = self._get_request_image_path()
         if not image_path:
             messagebox.showwarning("Thieu anh", "Hay chon anh khay truoc.")
             return
@@ -422,6 +460,7 @@ class RoiStepPanel(StepPanelBase):
                 self.app.shared["roi_crop_signature"] = crop_signature
             self.app.shared["roi_params"] = request["roi_params"]
             self.app.shared["image_path"] = request["image_path"]
+            self._source_image_path = request["image_path"]
             if hough_result and hough_result.get("success"):
                 self.app.shared["hough_result"] = hough_result
                 self.app.shared["hough_params"] = request["hough_params"]
@@ -451,7 +490,73 @@ class RoiStepPanel(StepPanelBase):
                 int(round(float(item.get("center_y", item["circle"]["y"])))),
                 int(round(float(item.get("radius_full", item["circle"]["r"])))),
                 round(float(item.get("score", item["circle"].get("score", 0.0))), 4),
+                round(float(item.get("support_pct", item["circle"].get("support_pct", 0.0))), 1),
             )
             for item in refined_items
         ]
         self.table.set_rows(rows)
+
+    def _on_image_path_changed(self, *_args):
+        if self._suspend_path_trace:
+            return
+        self._entry_shows_display_path = False
+        self._source_image_path = self.image_path_var.get().strip()
+
+    def _set_image_path_entry(self, path, display_only=False):
+        self._suspend_path_trace = True
+        try:
+            self.image_path_var.set(path or "")
+        finally:
+            self._suspend_path_trace = False
+        self._entry_shows_display_path = bool(display_only and path)
+
+    def _get_request_image_path(self):
+        entry_path = self.image_path_var.get().strip()
+        if not self._entry_shows_display_path and entry_path:
+            self._source_image_path = entry_path
+            return entry_path
+        if self._source_image_path:
+            return self._source_image_path
+        shared_path = self.app.shared.get("image_path", "")
+        if shared_path:
+            self._source_image_path = shared_path
+        return shared_path
+
+    def _resolve_selected_roi_path(self):
+        selected = self._find_selected_roi_item(self.current_result)
+        if selected is None:
+            return ""
+        saved_path = selected.get("saved_path")
+        if saved_path:
+            return str(saved_path)
+        roi_id = int(selected.get("id", 0))
+        if roi_id <= 0:
+            return ""
+        return str(ROI_DIR / "roi_stator_{:02d}.png".format(roi_id))
+
+    def _resolve_display_path(self, image_key):
+        saved_debug_path = self._saved_debug_paths.get(image_key)
+        if saved_debug_path:
+            return saved_debug_path
+        if image_key and image_key.startswith("selected_roi"):
+            roi_path = self._resolve_selected_roi_path()
+            if roi_path:
+                return roi_path
+        return self._source_image_path or self.app.shared.get("image_path", "")
+
+    def _show_current_image_path(self, image_key):
+        path = self._resolve_display_path(image_key)
+        self._set_image_path_entry(path, display_only=bool(path))
+
+    def _suggest_debug_filename(self, image_key):
+        source_path = self._source_image_path or self.app.shared.get("image_path", "")
+        source_stem = Path(source_path).stem if source_path else "roi_debug"
+        selected = self._find_selected_roi_item(self.current_result)
+        if image_key == "overview":
+            return "{}_roi_overview.png".format(source_stem)
+        if image_key and image_key.startswith("selected_roi"):
+            roi_suffix = "roi"
+            if selected is not None:
+                roi_suffix = "roi_{:02d}".format(int(selected.get("id", 0)))
+            return "{}_{}_{}.png".format(source_stem, roi_suffix, image_key)
+        return "{}_{}.png".format(source_stem, image_key or "debug")

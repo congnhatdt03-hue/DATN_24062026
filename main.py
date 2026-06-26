@@ -2,19 +2,15 @@
 
 from src.config import (
     DEFAULT_HOUGH_PARAMS,
-    DEFAULT_RADIAL_PARAMS,
     DEFAULT_ROI_PARAMS,
-    DEFAULT_TAB_EDGE_PARAMS,
     HOUGH_PRESET_PATH,
     INPUT_DIR,
-    RADIAL_PRESET_PATH,
     ROI_PRESET_PATH,
-    TAB_EDGE_PRESET_PATH,
     TEMPLATE_DATA_PATH,
 )
 from src.io_utils import ensure_project_dirs, get_first_image
 from src.pipeline_runner import run_full_pipeline
-from src.preset_store import ensure_default_presets, load_preset
+from src.preset_store import ensure_default_presets, load_preset, load_radial_signature_preset
 from src.template_builder import load_template_data
 
 
@@ -36,8 +32,9 @@ def main():
 
     hough_params = load_preset(HOUGH_PRESET_PATH, DEFAULT_HOUGH_PARAMS)
     roi_params = load_preset(ROI_PRESET_PATH, DEFAULT_ROI_PARAMS)
-    tab_edge_params = load_preset(TAB_EDGE_PRESET_PATH, DEFAULT_TAB_EDGE_PARAMS)
-    radial_params = load_preset(RADIAL_PRESET_PATH, DEFAULT_RADIAL_PARAMS)
+    preset_bundle = load_radial_signature_preset()
+    tab_edge_params = preset_bundle["tab_edge_params"]
+    radial_params = preset_bundle["radial_params"]
 
     result = run_full_pipeline(str(first_image), hough_params, roi_params, tab_edge_params, radial_params, template_data)
     if not result["success"]:
